@@ -36,6 +36,106 @@ questions = [
         "answers": ["When grill runs out of gas", "When meat stops temp rising", "When party ends", "When coals die"],
         "correct": 1,
     },
+    {
+        "text": "Which cut is most commonly used for pulled pork?",
+        "answers": ["Pork belly", "Pork loin", "Pork shoulder", "Pork chop"],
+        "correct": 2,
+    },
+    {
+        "text": "Which of these is a 'low and slow' cooking temperature?",
+        "answers": ["225°F (107°C)", "375°F (190°C)", "450°F (230°C)", "525°F (274°C)"],
+        "correct": 0,
+    },
+    {
+        "text": "What does 'direct heat' mean on a grill?",
+        "answers": ["Food cooks beside the flame", "Food cooks over the heat source", "Food cooks in foil", "Food cooks after resting"],
+        "correct": 1,
+    },
+    {
+        "text": "What is the main benefit of letting chicken marinade sit for a few hours?",
+        "answers": ["It cools the meat", "It adds flavor", "It removes fat", "It fully cooks it"],
+        "correct": 1,
+    },
+    {
+        "text": "Which wood gives a mild, slightly sweet smoke flavor?",
+        "answers": ["Apple", "Hickory", "Oak", "Pine"],
+        "correct": 0,
+    },
+    {
+        "text": "What should you use to check if meat is safely cooked?",
+        "answers": ["A fork", "A timer only", "A meat thermometer", "The smoke color"],
+        "correct": 2,
+    },
+    {
+        "text": "Which of these burgers is safest to cook to well done?",
+        "answers": ["Ground beef burger", "Steak", "Lamb chop", "Pork tenderloin"],
+        "correct": 0,
+    },
+    {
+        "text": "Why do people oil the grill grates before cooking?",
+        "answers": ["To cool them down", "To stop food sticking", "To make more smoke", "To season the salad"],
+        "correct": 1,
+    },
+    {
+        "text": "What color should chicken juices run when properly cooked?",
+        "answers": ["Pink", "Red", "Clear", "Green"],
+        "correct": 2,
+    },
+    {
+        "text": "What is a common sign that charcoal is ready for cooking?",
+        "answers": ["It is dripping", "It turns grey-white", "It goes completely black", "It stops being hot"],
+        "correct": 1,
+    },
+    {
+        "text": "Which sauce is most associated with Kansas City BBQ?",
+        "answers": ["Thin vinegar sauce", "White mayo sauce", "Thick sweet tomato sauce", "No sauce at all"],
+        "correct": 2,
+    },
+    {
+        "text": "What is the purpose of resting brisket after cooking?",
+        "answers": ["To make it colder", "To let juices redistribute", "To add more smoke", "To crisp the bark"],
+        "correct": 1,
+    },
+    {
+        "text": "What is the danger of pressing burgers with a spatula while cooking?",
+        "answers": ["It adds too much salt", "It squeezes out juices", "It makes them cook faster", "It removes grill marks"],
+        "correct": 1,
+    },
+    {
+        "text": "Which BBQ region is famous for white sauce with chicken?",
+        "answers": ["Texas", "Alabama", "Kansas", "Memphis"],
+        "correct": 1,
+    },
+    {
+        "text": "Which of these foods is usually cooked with indirect heat?",
+        "answers": ["A whole chicken", "Thin burger patties", "Hot dogs", "Shrimp skewers"],
+        "correct": 0,
+    },
+    {
+        "text": "What does 'searing' do best?",
+        "answers": ["Adds a browned crust", "Fully cooks the center", "Reduces smoke", "Makes meat sweeter"],
+        "correct": 0,
+    },
+    {
+        "text": "Which ingredient is most common in a dry rub?",
+        "answers": ["Powdered sugar", "Paprika", "Mayonnaise", "Soy milk"],
+        "correct": 1,
+    },
+    {
+        "text": "What is the safest way to thaw meat before a BBQ?",
+        "answers": ["On the counter all day", "In the fridge", "In direct sunlight", "Next to the grill"],
+        "correct": 1,
+    },
+    {
+        "text": "What kind of ribs come from the upper rib cage near the backbone?",
+        "answers": ["Spare ribs", "Baby back ribs", "Short ribs", "Country-style ribs"],
+        "correct": 1,
+    },
+    {
+        "text": "If flames flare up under fatty meat, what should you do first?",
+        "answers": ["Spray lots of water", "Move the meat to cooler heat", "Close your eyes", "Add more oil"],
+        "correct": 1,
+    },
 ]
 
 
