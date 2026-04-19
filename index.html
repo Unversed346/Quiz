@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>BBQ Quiz</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { min-height: 100vh; background: linear-gradient(135deg, #ff6b35, #f7931e); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    .container { background: white; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 40px rgba(0,0,0,0.2); width: 100%; max-width: 540px; text-align: center; }
+    h1 { color: #ff6b35; margin-bottom: 0.5rem; font-size: 2.4rem; }
+    .subtitle { color: #666; margin-bottom: 2rem; }
+    .btn { background: #ff6b35; color: white; border: none; padding: 1rem 1.2rem; font-size: 1.15rem; border-radius: 0.75rem; cursor: pointer; width: 100%; margin: 0.5rem 0; }
+    .btn:disabled { opacity: 0.7; cursor: default; }
+    input { width: 100%; padding: 1rem; font-size: 1.05rem; border: 2px solid #ddd; border-radius: 0.75rem; margin: 0.5rem 0; }
+    input:focus { outline: none; border-color: #ff6b35; }
+    .error { color: #d00; margin-top: 1rem; min-height: 1.2rem; }
+    .hint { color: #666; margin-top: 0.75rem; min-height: 2.4rem; font-size: 0.95rem; }
+    .waiting { font-size: 1.35rem; margin: 1.5rem 0; color: #555; }
+    .timer { font-size: 2.8rem; color: #ff6b35; margin: 1rem 0; }
+    .question { background: #fff5ef; padding: 1.25rem; border-radius: 1rem; margin: 1rem 0; }
+    .q-text { font-size: 1.35rem; margin-bottom: 1rem; color: #4a2a1f; }
+    .answers { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .answer-btn { background: #333; color: white; border: none; padding: 1rem; font-size: 1.05rem; border-radius: 0.85rem; cursor: pointer; }
+    .feedback { font-size: 1.25rem; margin: 1rem 0; color: #4a2a1f; min-height: 1.5em; }
+    .leaderboard { background: #fff5ef; padding: 1rem; border-radius: 1rem; text-align: left; margin-top: 1rem; }
+    .entry { display: flex; justify-content: space-between; padding: 0.5rem 0; }
+    .name { color: #ff6b35; }
+    .hidden { display: none; }
+    @media (max-width: 500px) { .answers { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="homeView">
+      <h1>🔥 BBQ Quiz</h1>
+      <p class="subtitle">Test your BBQ knowledge!</p>
+      <button class="btn" onclick="createLobby()">Host a Game</button>
+      <hr style="margin:1.5rem 0;border:0;border-top:1px solid #eee;">
+      <input type="text" id="playerName" placeholder="Your Name" maxlength="20">
+      <input type="text" id="lobbyCode" placeholder="Game Code" maxlength="6" style="text-transform:uppercase;">
+      <button class="btn" id="joinBtn" onclick="joinLobby()">Join Game</button>
+      <p class="error" id="error"></p>
+      <p class="hint" id="hint"></p>
+    </div>
+
+    <div id="playerView" class="hidden">
+      <h1>🔥 BBQ Quiz</h1>
+      <div id="waiting" class="waiting">Waiting for host to start...</div>
+      <div id="game" class="hidden">
+        <div class="timer" id="timer"></div>
+        <div class="question" id="question">
+          <p class="q-text" id="qText"></p>
+          <div class="answers" id="answers"></div>
+        </div>
+        <div id="feedback" class="feedback"></div>
+      </div>
+      <div class="leaderboard hidden" id="leaderboard">
+        <h2>🏆 Final Results</h2>
+        <div id="leaderboardList"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+
+    var joinSocket = null;
+    var playerName = '';
+    var lobbyCode = '';
+    var answered = false;
+    var timerInterval = null;
+    var joinTimeout = null;
+
+    function showError(message) {
+      document.getElementById('error').textContent = message;
+    }
+
+    function showHint(message) {
+      var el = document.getElementById('hint');
+      if (el) el.textContent = message;
+    }
+
+    function createLobby() {
+      var ws = new WebSocket(WS_URL);
+      ws.onopen = function() {
+        ws.send('host:');
+      };
+      ws.onmessage = function(e) {
+        var data = JSON.parse(e.data);
+        if (data.type === 'lobby-created') {
+          window.location.href = '/host.html?code=' + data.lobbyCode;
+        }
+      };
+      ws.onerror = function() {
+        showError('Cannot connect to server');
+      };
+    }
+
+    function startTimer(seconds) {
+      var remaining = seconds;
+      var timerEl = document.getElementById('timer');
+      timerEl.textContent = remaining;
+      clearInterval(timerInterval);
+      timerInterval = setInterval(function() {
+        remaining--;
+        timerEl.textContent = remaining;
+        if (remaining <= 0) {
+          clearInterval(timerInterval);
+        }
+      }, 1000);
+    }
+
+    function renderLeaderboard(leaderboard) {
+      document.getElementById('game').classList.add('hidden');
+      document.getElementById('leaderboard').classList.remove('hidden');
+      document.getElementById('leaderboardList').innerHTML = leaderboard.map(function(player, i) {
+        return '<div class="entry"><span>' + (i + 1) + '. <span class="name">' + player.name + '</span></span><span>' + player.score + '</span></div>';
+      }).join('');
+    }
+
+    function showPlayerView() {
+      document.getElementById('homeView').classList.add('hidden');
+      document.getElementById('playerView').classList.remove('hidden');
+      document.getElementById('waiting').classList.remove('hidden');
+      document.getElementById('game').classList.add('hidden');
+      document.getElementById('leaderboard').classList.add('hidden');
+      document.getElementById('feedback').textContent = '';
+    }
+
+    function submitAnswer(index) {
+      if (answered || !joinSocket || joinSocket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+
+      answered = true;
+      var buttons = document.querySelectorAll('.answer-btn');
+      buttons.forEach(function(button) {
+        button.disabled = true;
+      });
+      document.getElementById('feedback').textContent = 'Answer locked in...';
+      joinSocket.send('answer:' + lobbyCode + ':' + index);
+    }
+
+    function handlePlayerMessage(data) {
+      if (data.type === 'joined') {
+        showPlayerView();
+      } else if (data.type === 'question') {
+        answered = false;
+        document.getElementById('waiting').classList.add('hidden');
+        document.getElementById('leaderboard').classList.add('hidden');
+        document.getElementById('game').classList.remove('hidden');
+        document.getElementById('feedback').textContent = '';
+        document.getElementById('qText').textContent = data.text;
+        document.getElementById('answers').innerHTML = data.answers.map(function(answer, i) {
+          return '<button class="answer-btn" onclick="submitAnswer(' + i + ')">' + answer + '</button>';
+        }).join('');
+        startTimer(data.timeLimit);
+      } else if (data.type === 'answer-result') {
+        document.getElementById('feedback').textContent = data.correct ? 'Correct! +' + data.points : 'Not this time';
+      } else if (data.type === 'time-up') {
+        document.getElementById('timer').textContent = "Time's Up!";
+        var buttons = document.querySelectorAll('.answer-btn');
+        buttons.forEach(function(button) {
+          button.disabled = true;
+        });
+      } else if (data.type === 'game-over') {
+        renderLeaderboard(data.leaderboard);
+      } else if (data.type === 'error') {
+        document.getElementById('homeView').classList.remove('hidden');
+        document.getElementById('playerView').classList.add('hidden');
+        showError(data.message);
+      }
+    }
+
+    function joinLobby() {
+      playerName = document.getElementById('playerName').value.trim();
+      lobbyCode = document.getElementById('lobbyCode').value.trim().toUpperCase();
+
+      if (!playerName) {
+        showError('Enter your name');
+        return;
+      }
+      if (!lobbyCode) {
+        showError('Enter game code');
+        return;
+      }
+
+      showError('');
+      showHint('');
+      document.getElementById('joinBtn').disabled = true;
+      document.getElementById('joinBtn').textContent = 'Joining...';
+
+      if (joinSocket) {
+        try { joinSocket.close(); } catch (e) {}
+      }
+
+      joinSocket = new WebSocket(WS_URL);
+      joinTimeout = setTimeout(function() {
+        if (joinSocket && joinSocket.readyState === WebSocket.CONNECTING) {
+          try { joinSocket.close(); } catch (e) {}
+          document.getElementById('joinBtn').disabled = false;
+          document.getElementById('joinBtn').textContent = 'Join Game';
+          showError('Connection timed out');
+          showHint('This phone can open the page, but it could not make the live quiz connection.');
+        }
+      }, 4000);
+
+      joinSocket.onopen = function() {
+        clearTimeout(joinTimeout);
+        joinSocket.send('join:' + lobbyCode + ':' + playerName);
+      };
+      joinSocket.onmessage = function(e) {
+        clearTimeout(joinTimeout);
+        handlePlayerMessage(JSON.parse(e.data));
+      };
+      joinSocket.onerror = function() {
+        clearTimeout(joinTimeout);
+        document.getElementById('joinBtn').disabled = false;
+        document.getElementById('joinBtn').textContent = 'Join Game';
+        showError('Cannot connect to server');
+        showHint('This phone can open the page, but it could not make the live quiz connection.');
+      };
+      joinSocket.onclose = function() {
+        clearTimeout(joinTimeout);
+        if (!document.getElementById('homeView').classList.contains('hidden')) {
+          document.getElementById('joinBtn').disabled = false;
+          document.getElementById('joinBtn').textContent = 'Join Game';
+        }
+      };
+    }
+  </script>
+</body>
+</html>

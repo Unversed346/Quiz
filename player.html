@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>BBQ Quiz - Player</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    body { min-height: 100vh; background: linear-gradient(135deg, #1a1a2e, #16213e); color: white; padding: 1rem; display: flex; align-items: center; justify-content: center; }
+    .container { width: 100%; max-width: 600px; text-align: center; }
+    h1 { color: #ff6b35; margin-bottom: 1rem; font-size: 2rem; }
+    .waiting { font-size: 1.5rem; margin: 2rem 0; }
+    .question { background: rgba(255,255,255,0.1); padding: 2rem; border-radius: 1rem; margin: 1rem 0; }
+    .q-text { font-size: 1.5rem; margin-bottom: 2rem; }
+    .answers { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .answer-btn { background: #333; border: 3px solid #555; color: white; padding: 1.5rem; font-size: 1.3rem; border-radius: 1rem; cursor: pointer; }
+    .answer-btn.correct { background: #27ae60; border-color: #2ecc71; }
+    .answer-btn.wrong { background: #c0392b; border-color: #e74c3c; }
+    .timer { font-size: 3rem; color: #ff6b35; margin: 1rem 0; }
+    .feedback { font-size: 2rem; margin: 1rem 0; }
+    .leaderboard { background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 1rem; }
+    .entry { display: flex; justify-content: space-between; padding: 0.5rem; font-size: 1.2rem; }
+    .name { color: #ff6b35; }
+    @media (max-width: 500px) { .answers { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔥 BBQ Quiz</h1>
+    <div id="waiting" class="waiting">Waiting for host to start...</div>
+    <div id="game" style="display:none;">
+      <div class="timer" id="timer"></div>
+      <div class="question" id="question">
+        <p class="q-text" id="qText"></p>
+        <div class="answers" id="answers"></div>
+      </div>
+      <div id="feedback" class="feedback"></div>
+    </div>
+    <div class="leaderboard" id="leaderboard" style="display:none;">
+      <h2>🏆 Final Results</h2>
+      <div id="leaderboardList"></div>
+    </div>
+  </div>
+  <script>
+    var WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    var params = new URLSearchParams(location.search);
+    var code = params.get('code') || localStorage.getItem('bbqQuizLobbyCode');
+    var name = params.get('name') || localStorage.getItem('bbqQuizPlayerName') || 'Guest';
+    var ws = null;
+    var currentQuestion = null;
+    var answered = false;
+    var timerInterval = null;
+
+    if (!params.get('code') && code) {
+      history.replaceState(null, '', '/player.html?code=' + encodeURIComponent(code) + '&name=' + encodeURIComponent(name));
+    }
+
+    function connect() {
+      ws = new WebSocket(WS_URL);
+      ws.onopen = function() {
+        ws.send('join:' + code + ':' + name);
+      };
+      ws.onmessage = function(e) {
+        var data = JSON.parse(e.data);
+        if (data.type === 'joined') {
+          localStorage.removeItem('bbqQuizPendingJoin');
+        } else if (data.type === 'question') {
+          currentQuestion = data;
+          answered = false;
+          document.getElementById('waiting').style.display = 'none';
+          document.getElementById('game').style.display = 'block';
+          document.getElementById('question').style.display = 'block';
+          document.getElementById('feedback').textContent = '';
+          document.getElementById('qText').textContent = data.text;
+          document.getElementById('answers').innerHTML = data.answers.map(function(a, i) {
+            return '<button class="answer-btn" onclick="submitAnswer(' + i + ')">' + a + '</button>';
+          }).join('');
+          startTimer(data.timeLimit);
+        } else if (data.type === 'answer-result') {
+          document.getElementById('feedback').textContent = data.correct ? 'Correct! +' + data.points : 'Not this time';
+        } else if (data.type === 'time-up') {
+          document.getElementById('timer').textContent = "Time's Up!";
+          var btns = document.querySelectorAll('.answer-btn');
+          btns.forEach(function(btn) { btn.disabled = true; });
+        } else if (data.type === 'game-over') {
+          document.getElementById('game').style.display = 'none';
+          document.getElementById('leaderboard').style.display = 'block';
+          document.getElementById('leaderboardList').innerHTML = data.leaderboard.map(function(p, i) {
+            return '<div class="entry"><span>' + (i+1) + '. <span class="name">' + p.name + '</span></span><span>' + p.score + '</span></div>';
+          }).join('');
+        }
+      };
+    }
+
+    function submitAnswer(index) {
+      if (answered) return;
+      answered = true;
+      var btns = document.querySelectorAll('.answer-btn');
+      btns.forEach(function(btn) { btn.disabled = true; });
+      if (btns[index]) {
+        btns[index].style.opacity = '0.7';
+        btns[index].style.transform = 'scale(0.98)';
+      }
+      document.getElementById('feedback').textContent = 'Answer locked in...';
+      
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('answer:' + code + ':' + index);
+      }
+    }
+
+    function startTimer(seconds) {
+      var remaining = seconds;
+      var timerEl = document.getElementById('timer');
+      timerEl.textContent = remaining;
+      clearInterval(timerInterval);
+      timerInterval = setInterval(function() {
+        remaining--;
+        timerEl.textContent = remaining;
+        if (remaining <= 0) clearInterval(timerInterval);
+      }, 1000);
+    }
+
+    connect();
+  </script>
+</body>
+</html>

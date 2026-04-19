@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>BBQ Quiz - Host</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    body { min-height: 100vh; background: linear-gradient(135deg, #1a1a2e, #16213e); color: white; padding: 1rem; }
+    .container { max-width: 800px; margin: 0 auto; }
+    h1 { color: #ff6b35; margin-bottom: 1rem; }
+    .lobby { background: rgba(255,255,255,0.1); padding: 1.5rem; border-radius: 1rem; text-align: center; margin-bottom: 1rem; }
+    .code { font-size: 4rem; letter-spacing: 1rem; color: #ff6b35; font-weight: bold; }
+    .players { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin: 1rem 0; }
+    .player { background: #ff6b35; padding: 0.5rem 1rem; border-radius: 2rem; font-size: 1.1rem; }
+    .btn { background: #ff6b35; color: white; border: none; padding: 1rem 2rem; font-size: 1.3rem; border-radius: 0.5rem; cursor: pointer; }
+    .btn:hover { background: #e55a2b; }
+    .question-box { background: rgba(255,255,255,0.1); padding: 2rem; border-radius: 1rem; text-align: center; }
+    .q-text { font-size: 1.8rem; margin-bottom: 2rem; }
+    .leaderboard { background: rgba(255,255,255,0.1); padding: 1rem; border-radius: 1rem; }
+    .entry { display: flex; justify-content: space-between; padding: 0.5rem; font-size: 1.2rem; }
+    .timer { font-size: 3rem; color: #ff6b35; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔥 BBQ Quiz - Host</h1>
+    <div class="lobby">
+      <p>Game Code:</p>
+      <div class="code" id="code">Loading...</div>
+      <p>Share this code with players!</p>
+      <div class="players" id="players"></div>
+    </div>
+    <button class="btn" id="startBtn" onclick="startGame()">Start Game</button>
+    <div id="gameInfo" style="display:none;">
+      <div class="timer" id="timer"></div>
+      <div class="question-box" id="questionBox" style="display:none;">
+        <p class="q-text" id="qText"></p>
+        <p>Answers: <span id="answerCount">0</span></p>
+      </div>
+      <button class="btn" id="nextBtn" onclick="nextQuestion()" style="display:none;">Next Question</button>
+    </div>
+    <div class="leaderboard" id="leaderboard" style="display:none;">
+      <h2>🏆 Leaderboard</h2>
+      <div id="leaderboardList"></div>
+    </div>
+  </div>
+  <script>
+    var WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+    var code = new URLSearchParams(location.search).get('code');
+    var ws = null;
+    var timerInterval = null;
+
+    document.getElementById('code').textContent = code || 'Waiting...';
+
+    function connect() {
+      console.log('Connecting to', WS_URL);
+      ws = new WebSocket(WS_URL);
+      ws.onopen = function() {
+        console.log('Connected! Sending host:', code);
+        ws.send('host:' + code);
+      };
+      ws.onerror = function(e) {
+        console.error('WebSocket error:', e);
+      };
+      ws.onclose = function(e) {
+        console.log('Closed:', e.code, e.reason);
+      };
+      ws.onmessage = function(e) {
+        var data = JSON.parse(e.data);
+        if (data.type === 'lobby-created') {
+          document.getElementById('code').textContent = data.lobbyCode;
+          code = data.lobbyCode;
+        } else if (data.type === 'player-joined') {
+          document.getElementById('players').innerHTML = data.players.map(function(p) {
+            return '<span class="player">' + p.name + '</span>';
+          }).join('');
+        } else if (data.type === 'player-left') {
+          document.getElementById('players').innerHTML = data.players.map(function(p) {
+            return '<span class="player">' + p.name + '</span>';
+          }).join('');
+        } else if (data.type === 'question') {
+          document.getElementById('questionBox').style.display = 'block';
+          document.getElementById('qText').textContent = data.text;
+          document.getElementById('answerCount').textContent = '0';
+          document.getElementById('startBtn').style.display = 'none';
+          document.getElementById('nextBtn').style.display = 'none';
+          startTimer(data.timeLimit);
+        } else if (data.type === 'answer-count') {
+          document.getElementById('answerCount').textContent = data.count + '/' + data.totalPlayers;
+          if (data.totalPlayers > 0 && data.count >= data.totalPlayers) {
+            document.getElementById('nextBtn').style.display = 'block';
+          }
+        } else if (data.type === 'time-up') {
+          document.getElementById('nextBtn').style.display = 'block';
+        } else if (data.type === 'game-over') {
+          document.getElementById('questionBox').style.display = 'none';
+          document.getElementById('leaderboard').style.display = 'block';
+          document.getElementById('leaderboardList').innerHTML = data.leaderboard.map(function(p, i) {
+            return '<div class="entry"><span>' + (i+1) + '. ' + p.name + '</span><span>' + p.score + '</span></div>';
+          }).join('');
+        }
+      };
+    }
+
+    function startGame() {
+      document.getElementById('gameInfo').style.display = 'block';
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('host-start:' + code);
+      }
+    }
+
+    function nextQuestion() {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('host-next:' + code);
+      }
+    }
+
+    function startTimer(seconds) {
+      var remaining = seconds;
+      var timerEl = document.getElementById('timer');
+      timerEl.textContent = remaining;
+      clearInterval(timerInterval);
+      timerInterval = setInterval(function() {
+        remaining--;
+        timerEl.textContent = remaining;
+        if (remaining <= 0) clearInterval(timerInterval);
+      }, 1000);
+    }
+
+    connect();
+  </script>
+</body>
+</html>
