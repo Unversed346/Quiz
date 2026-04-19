@@ -4,29 +4,11 @@ import json
 import os
 import random
 from pathlib import Path
-from urllib.parse import urlparse
 
-import websockets
-from websockets.exceptions import ConnectionClosed
-from websockets.datastructures import Headers
-from websockets.http11 import Response
+from aiohttp import WSMsgType, web
 
 PORT = int(os.getenv("PORT", "3000"))
 BASE_DIR = Path(__file__).resolve().parent
-
-STATIC_FILES = {
-    "/": "index.html",
-    "/index.html": "index.html",
-    "/host.html": "host.html",
-    "/player.html": "player.html",
-}
-
-CONTENT_TYPES = {
-    ".html": "text/html; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".js": "application/javascript; charset=utf-8",
-    ".json": "application/json; charset=utf-8",
-}
 
 questions = [
     {
@@ -82,6 +64,21 @@ def player_list(game):
     return [{"name": player["name"], "score": player["score"]} for player in game.players.values()]
 
 
+async def safe_send(socket, payload):
+    if socket is None or socket.closed:
+        return
+
+    try:
+        await socket.send_str(payload)
+    except Exception:
+        pass
+
+
+async def broadcast_to_players(game, payload):
+    for player in list(game.players.values()):
+        await safe_send(player["socket"], payload)
+
+
 async def send_answer_count(game):
     await safe_send(
         game.host,
@@ -95,57 +92,95 @@ async def send_answer_count(game):
     )
 
 
-async def safe_send(websocket, payload):
-    if websocket is None:
+async def finish_question(game, correct_index=None):
+    if not game.answer_open:
         return
 
+    game.answer_open = False
+    if game.timer_task is not None:
+        game.timer_task.cancel()
+        game.timer_task = None
+
+    if correct_index is None and game.current_question >= 0:
+        correct_index = questions[game.current_question]["correct"]
+
+    payload = json.dumps({"type": "time-up", "correct": correct_index})
+    await safe_send(game.host, payload)
+    await broadcast_to_players(game, payload)
+
+
+async def question_timer(game, correct_index):
     try:
-        await websocket.send(payload)
-    except Exception:
+        await asyncio.sleep(game.time_limit)
+        await finish_question(game, correct_index)
+    except asyncio.CancelledError:
         pass
 
 
-async def broadcast_to_players(game, payload):
-    for player in list(game.players.values()):
-        await safe_send(player["websocket"], payload)
+async def next_question(game):
+    if game.timer_task is not None:
+        game.timer_task.cancel()
+        game.timer_task = None
+
+    game.current_question += 1
+    game.answer_open = True
+    game.submissions = set()
+
+    question = questions[game.current_question]
+    payload = json.dumps(
+        {
+            "type": "question",
+            "number": game.current_question + 1,
+            "total": len(questions),
+            "text": question["text"],
+            "answers": question["answers"],
+            "timeLimit": game.time_limit,
+        }
+    )
+
+    await safe_send(game.host, payload)
+    await broadcast_to_players(game, payload)
+    await send_answer_count(game)
+    game.timer_task = asyncio.create_task(question_timer(game, question["correct"]))
 
 
-def http_response(status_code, reason_phrase, body, content_type):
-    headers = Headers()
-    headers["Content-Type"] = content_type
-    headers["Content-Length"] = str(len(body))
-    headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    return Response(status_code, reason_phrase, headers, body)
+async def end_game(game):
+    leaderboard = sorted(player_list(game), key=lambda player: player["score"], reverse=True)[:10]
+    payload = json.dumps({"type": "game-over", "leaderboard": leaderboard})
+    await safe_send(game.host, payload)
+    await broadcast_to_players(game, payload)
 
 
-def load_static_response(path):
-    filename = STATIC_FILES.get(path)
-    if filename is None:
-        body = b"Not Found"
-        return http_response(404, "Not Found", body, "text/plain; charset=utf-8")
+async def cleanup_socket(socket):
+    client_id = id(socket)
 
-    file_path = BASE_DIR / filename
-    if not file_path.exists():
-        body = b"Missing file"
-        return http_response(500, "Internal Server Error", body, "text/plain; charset=utf-8")
+    for code, game in list(games.items()):
+        if game.host == socket:
+            game.host = None
+        elif client_id in game.players:
+            del game.players[client_id]
+            del game.scores[client_id]
+            await safe_send(game.host, json.dumps({"type": "player-left", "players": player_list(game)}))
+            if game.answer_open:
+                await send_answer_count(game)
 
-    body = file_path.read_bytes()
-    content_type = CONTENT_TYPES.get(file_path.suffix, "application/octet-stream")
-    return http_response(200, "OK", body, content_type)
-
-
-async def process_request(connection, request):
-    path = urlparse(request.path).path
-    if path == "/ws":
-        return None
-    return load_static_response(path)
+        if game.host is None and not game.players:
+            if game.timer_task is not None:
+                game.timer_task.cancel()
+            del games[code]
 
 
-async def handle_client(websocket):
-    client_id = id(websocket)
+async def websocket_handler(request):
+    ws = web.WebSocketResponse()
+    await ws.prepare(request)
+    client_id = id(ws)
 
     try:
-        async for message in websocket:
+        async for msg in ws:
+            if msg.type != WSMsgType.TEXT:
+                continue
+
+            message = msg.data
             if not message:
                 continue
 
@@ -160,23 +195,26 @@ async def handle_client(websocket):
                     game = Game(code)
                     games[code] = game
 
-                game.host = websocket
-                await safe_send(websocket, json.dumps({"type": "lobby-created", "lobbyCode": code}))
+                game.host = ws
+                await safe_send(ws, json.dumps({"type": "lobby-created", "lobbyCode": code}))
 
             elif cmd == "join":
                 code = data[1] if len(data) > 1 else ""
                 name = ":".join(data[2:]) if len(data) > 2 else "Guest"
 
                 if code not in games:
-                    await safe_send(websocket, json.dumps({"type": "error", "message": "Game not found"}))
+                    await safe_send(ws, json.dumps({"type": "error", "message": "Game not found"}))
                     continue
 
                 game = games[code]
-                game.players[client_id] = {"websocket": websocket, "name": name, "score": 0}
-                game.scores[client_id] = 0
+                game.players[client_id] = {"socket": ws, "name": name, "score": 0}
+                game.scores[client_id] = game.scores.get(client_id, 0)
+                game.players[client_id]["score"] = game.scores[client_id]
 
-                await safe_send(websocket, json.dumps({"type": "joined", "name": name}))
+                await safe_send(ws, json.dumps({"type": "joined", "name": name}))
                 await safe_send(game.host, json.dumps({"type": "player-joined", "players": player_list(game)}))
+                if game.answer_open:
+                    await send_answer_count(game)
 
             elif cmd == "host-start":
                 code = data[1] if len(data) > 1 else ""
@@ -216,97 +254,40 @@ async def handle_client(websocket):
                 game.players[client_id]["score"] = game.scores[client_id]
 
                 await safe_send(
-                    websocket,
+                    ws,
                     json.dumps({"type": "answer-result", "correct": is_correct, "points": points}),
                 )
                 await send_answer_count(game)
 
                 if game.players and len(game.submissions) >= len(game.players):
                     await finish_question(game)
-    except ConnectionClosed:
-        pass
 
     finally:
-        for code, game in list(games.items()):
-            if game.host == websocket:
-                game.host = None
-            elif client_id in game.players:
-                del game.players[client_id]
-                del game.scores[client_id]
-                await safe_send(game.host, json.dumps({"type": "player-left", "players": player_list(game)}))
-                if game.answer_open:
-                    await send_answer_count(game)
+        await cleanup_socket(ws)
 
-            if game.host is None and not game.players:
-                if game.timer_task is not None:
-                    game.timer_task.cancel()
-                del games[code]
+    return ws
 
 
-async def next_question(game):
-    if game.timer_task is not None:
-        game.timer_task.cancel()
-        game.timer_task = None
-
-    game.current_question += 1
-    game.answer_open = True
-    game.submissions = set()
-
-    question = questions[game.current_question]
-    payload = json.dumps(
-        {
-            "type": "question",
-            "number": game.current_question + 1,
-            "total": len(questions),
-            "text": question["text"],
-            "answers": question["answers"],
-            "timeLimit": game.time_limit,
-        }
-    )
-
-    await safe_send(game.host, payload)
-    await broadcast_to_players(game, payload)
-    await send_answer_count(game)
-    game.timer_task = asyncio.create_task(question_timer(game, question["correct"]))
+async def file_handler(request):
+    requested = request.match_info["filename"]
+    allowed = {"index.html", "host.html", "player.html"}
+    if requested not in allowed:
+        raise web.HTTPNotFound(text="Not Found")
+    return web.FileResponse(BASE_DIR / requested, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
-async def question_timer(game, correct_index):
-    try:
-        await asyncio.sleep(game.time_limit)
-        await finish_question(game, correct_index)
-    except asyncio.CancelledError:
-        pass
+async def root_handler(request):
+    return web.FileResponse(BASE_DIR / "index.html", headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
-async def finish_question(game, correct_index=None):
-    if not game.answer_open:
-        return
-
-    game.answer_open = False
-    if game.timer_task is not None:
-        game.timer_task.cancel()
-        game.timer_task = None
-
-    if correct_index is None and game.current_question >= 0:
-        correct_index = questions[game.current_question]["correct"]
-
-    time_up_payload = json.dumps({"type": "time-up", "correct": correct_index})
-    await safe_send(game.host, time_up_payload)
-    await broadcast_to_players(game, time_up_payload)
-
-
-async def end_game(game):
-    leaderboard = sorted(player_list(game), key=lambda player: player["score"], reverse=True)[:10]
-    payload = json.dumps({"type": "game-over", "leaderboard": leaderboard})
-    await safe_send(game.host, payload)
-    await broadcast_to_players(game, payload)
-
-
-async def main():
-    async with websockets.serve(handle_client, "0.0.0.0", PORT, process_request=process_request):
-        print(f"BBQ Quiz running on http://0.0.0.0:{PORT}")
-        await asyncio.Future()
+def make_app():
+    app = web.Application()
+    app.router.add_get("/", root_handler)
+    app.router.add_get("/ws", websocket_handler)
+    app.router.add_get(r"/{filename:index\.html|host\.html|player\.html}", file_handler)
+    return app
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    print(f"BBQ Quiz running on http://0.0.0.0:{PORT}")
+    web.run_app(make_app(), host="0.0.0.0", port=PORT)
