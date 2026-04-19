@@ -85,19 +85,7 @@
     }
 
     function createLobby() {
-      var ws = new WebSocket(WS_URL);
-      ws.onopen = function() {
-        ws.send('host:');
-      };
-      ws.onmessage = function(e) {
-        var data = JSON.parse(e.data);
-        if (data.type === 'lobby-created') {
-          window.location.href = '/host.html?code=' + data.lobbyCode;
-        }
-      };
-      ws.onerror = function() {
-        showError('Cannot connect to server');
-      };
+      window.location.href = '/host.html';
     }
 
     function startTimer(seconds) {
