@@ -50,7 +50,7 @@
   </div>
   <script>
     var WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
-    var code = new URLSearchParams(location.search).get('code');
+    var code = new URLSearchParams(location.search).get('code') || '';
     var ws = null;
     var timerInterval = null;
 
@@ -74,6 +74,7 @@
         if (data.type === 'lobby-created') {
           document.getElementById('code').textContent = data.lobbyCode;
           code = data.lobbyCode;
+          history.replaceState(null, '', '/host.html?code=' + encodeURIComponent(code));
         } else if (data.type === 'player-joined') {
           document.getElementById('players').innerHTML = data.players.map(function(p) {
             return '<span class="player">' + p.name + '</span>';
