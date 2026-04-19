@@ -136,6 +136,106 @@ questions = [
         "answers": ["Spray lots of water", "Move the meat to cooler heat", "Close your eyes", "Add more oil"],
         "correct": 1,
     },
+    {
+        "text": "Which cut is the classic choice for beef brisket BBQ?",
+        "answers": ["Tenderloin", "Brisket", "Sirloin", "Flank"],
+        "correct": 1,
+    },
+    {
+        "text": "What is the main fuel source in a pellet grill?",
+        "answers": ["Wood pellets", "Charcoal briquettes", "Natural gas", "Sterno cans"],
+        "correct": 0,
+    },
+    {
+        "text": "What is a common internal temperature target for pulled pork?",
+        "answers": ["145°F (63°C)", "165°F (74°C)", "180°F (82°C)", "203°F (95°C)"],
+        "correct": 3,
+    },
+    {
+        "text": "What is the 'bark' on smoked meat?",
+        "answers": ["The bone", "The dark outer crust", "A sauce layer", "The fat cap"],
+        "correct": 1,
+    },
+    {
+        "text": "Which BBQ style is most associated with vinegar-based pork sauce?",
+        "answers": ["Eastern North Carolina", "Kansas City", "Alabama white sauce", "Santa Maria"],
+        "correct": 0,
+    },
+    {
+        "text": "Why use a two-zone fire on a grill?",
+        "answers": ["To cook with only smoke", "To have hot and cooler areas", "To save charcoal forever", "To stop all flare-ups"],
+        "correct": 1,
+    },
+    {
+        "text": "Which steak is known for heavy marbling and rich flavor?",
+        "answers": ["Ribeye", "Round steak", "Eye of round", "Cube steak"],
+        "correct": 0,
+    },
+    {
+        "text": "What should you do with wooden skewers before grilling?",
+        "answers": ["Freeze them", "Soak them in water", "Paint them with oil", "Break them shorter"],
+        "correct": 1,
+    },
+    {
+        "text": "What is the safest minimum internal temperature for cooked chicken?",
+        "answers": ["145°F (63°C)", "155°F (68°C)", "165°F (74°C)", "185°F (85°C)"],
+        "correct": 2,
+    },
+    {
+        "text": "Which grill setup is best for smoking ribs low and slow?",
+        "answers": ["Direct flame on high", "Indirect heat", "Open flame with lid off", "Cast iron on the hob"],
+        "correct": 1,
+    },
+    {
+        "text": "What is mop sauce usually used for during smoking?",
+        "answers": ["Basting meat during cooking", "Cleaning the grill", "Cooling charcoal", "Thickening bark only"],
+        "correct": 0,
+    },
+    {
+        "text": "Which meat is most associated with Santa Maria barbecue?",
+        "answers": ["Tri-tip", "Pork shoulder", "Whole hog", "Turkey legs"],
+        "correct": 0,
+    },
+    {
+        "text": "What is one sign your grill is too crowded?",
+        "answers": ["Food browns quickly", "Heat cannot circulate well", "There are too many grill marks", "The lid closes easily"],
+        "correct": 1,
+    },
+    {
+        "text": "What is the main reason to keep the lid closed during smoking?",
+        "answers": ["To keep heat and smoke steady", "To make the grill lighter", "To reduce seasoning", "To stop meat resting"],
+        "correct": 0,
+    },
+    {
+        "text": "What is a common ingredient in Alabama white sauce?",
+        "answers": ["Mayonnaise", "Soy sauce", "Maple syrup", "Coconut milk"],
+        "correct": 0,
+    },
+    {
+        "text": "When cooking sausages, what helps prevent burnt outsides and raw middles?",
+        "answers": ["Cooking only over the hottest flame", "Using gentler heat", "Piercing them repeatedly", "Rolling them in sugar"],
+        "correct": 1,
+    },
+    {
+        "text": "What is the best reason to preheat a grill?",
+        "answers": ["It makes meat colder", "It helps prevent sticking and cooks evenly", "It removes smoke flavor", "It cuts cooking time to zero"],
+        "correct": 1,
+    },
+    {
+        "text": "Which BBQ meat is commonly wrapped during the stall to push through it?",
+        "answers": ["Brisket", "Hot dogs", "Chicken wings", "Burgers"],
+        "correct": 0,
+    },
+    {
+        "text": "What does 'carryover cooking' mean?",
+        "answers": ["Food keeps cooking after being removed from heat", "Food cooks while carried to the table", "Meat cools faster after grilling", "Sauce burns after serving"],
+        "correct": 0,
+    },
+    {
+        "text": "Why should raw meat and cooked meat use separate plates?",
+        "answers": ["To look nicer", "To avoid cross-contamination", "To save washing up", "To hold more sauce"],
+        "correct": 1,
+    },
 ]
 
 
@@ -150,6 +250,7 @@ class Game:
         self.submissions = set()
         self.time_limit = 20
         self.timer_task = None
+        self.active_questions = random.sample(questions, k=min(len(questions), 40))
 
 
 games = {}
@@ -202,7 +303,7 @@ async def finish_question(game, correct_index=None):
         game.timer_task = None
 
     if correct_index is None and game.current_question >= 0:
-        correct_index = questions[game.current_question]["correct"]
+        correct_index = game.active_questions[game.current_question]["correct"]
 
     payload = json.dumps({"type": "time-up", "correct": correct_index})
     await safe_send(game.host, payload)
@@ -226,15 +327,17 @@ async def next_question(game):
     game.answer_open = True
     game.submissions = set()
 
-    question = questions[game.current_question]
+    question = game.active_questions[game.current_question]
+    is_double = (game.current_question + 1) % 3 == 0
     payload = json.dumps(
         {
             "type": "question",
             "number": game.current_question + 1,
-            "total": len(questions),
+            "total": len(game.active_questions),
             "text": question["text"],
             "answers": question["answers"],
             "timeLimit": game.time_limit,
+            "doublePoints": is_double,
         }
     )
 
@@ -323,6 +426,7 @@ async def websocket_handler(request):
                     continue
 
                 game.current_question = -1
+                game.active_questions = random.sample(questions, k=min(len(questions), 40))
                 await next_question(game)
 
             elif cmd == "host-next":
@@ -331,7 +435,7 @@ async def websocket_handler(request):
                 if game is None:
                     continue
 
-                if game.current_question < len(questions) - 1:
+                if game.current_question < len(game.active_questions) - 1:
                     await next_question(game)
                 else:
                     await end_game(game)
@@ -347,8 +451,10 @@ async def websocket_handler(request):
                 if client_id in game.submissions:
                     continue
 
-                is_correct = 1 if answer_idx == questions[game.current_question]["correct"] else 0
-                points = is_correct * 1000
+                current_question = game.active_questions[game.current_question]
+                is_correct = 1 if answer_idx == current_question["correct"] else 0
+                multiplier = 2 if (game.current_question + 1) % 3 == 0 else 1
+                points = is_correct * 1000 * multiplier
                 game.submissions.add(client_id)
                 game.scores[client_id] = game.scores.get(client_id, 0) + points
                 game.players[client_id]["score"] = game.scores[client_id]
